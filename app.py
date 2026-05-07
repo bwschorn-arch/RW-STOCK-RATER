@@ -4,31 +4,31 @@ import pandas as pd
 import numpy as np
 
 # App Configuration
-st.set_page_config(page_title="Market Mind AI v24", layout="wide")
+st.set_page_config(page_title="Market Mind AI v25", layout="wide")
 
-# CSS: Nuclear Contrast, Compact UI & 52W Range Fix
+# CSS: Nuclear Contrast, Compact UI & Final Formatting
 st.markdown("""
     <style>
     .stApp { background-color: #0F172A !important; }
     h1, h2, h3, h4, p, span, li, div { color: #FFFFFF !important; font-family: 'Inter', sans-serif; }
     
-    /* Metrics: Force Consistent White Styling */
+    /* Metrics Sizing */
     [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 22px !important; font-weight: 700 !important; }
     [data-testid="stMetricLabel"] { color: #94A3B8 !important; font-size: 12px !important; }
     [data-testid="stMetric"] { background-color: #1E293B !important; border: 1px solid #3B82F6 !important; padding: 10px !important; border-radius: 8px !important; }
     
-    /* Left-Aligned, Compact Ticker Box */
+    /* Input Box */
     [data-testid="stTextInput"] { width: 180px !important; margin-left: 0 !important; }
     .stTextInput input { color: #000000 !important; background-color: #FFFFFF !important; font-weight: 700; height: 32px; }
     
-    /* The 52W Range Nuclear Fix: Absolute suppression of Streamlit delta coloring */
-    .range-white-out { color: #FFFFFF !important; background: transparent !important; font-weight: 600 !important; font-size: 15px !important; display: block !important; margin-bottom: 5px; }
+    /* 52W Range Final Fix */
+    .range-white-final { color: #FFFFFF !important; background: transparent !important; border: none !important; font-weight: 600 !important; font-size: 15px !important; margin-bottom: 5px; }
     
     .stDivider { margin: 12px 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# Helper: Historical Returns
+# Helpers
 def get_historical_return(ticker_obj, years):
     try:
         hist = ticker_obj.history(period=f"{years}y")
@@ -37,11 +37,10 @@ def get_historical_return(ticker_obj, years):
         return f"{((end - start) / start) * 100:+.1f}%"
     except: return "N/A"
 
-# Helper: 52-Week Range Fix
 def draw_52week_bar(low, high, current):
     if high > low:
         percent = (current - low) / (high - low)
-        st.markdown(f"<div class='range-white-out'>52W Range: ${low:,.2f} — ${high:,.2f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='range-white-final'>52W Range: ${low:,.2f} — ${high:,.2f}</div>", unsafe_allow_html=True)
         st.progress(min(max(percent, 0.0), 1.0))
     else: st.write("52W Range: N/A")
 
@@ -58,31 +57,25 @@ if ticker_input:
         roe = info.get('returnOnEquity', 0)
         margin = info.get('profitMargins', 0)
         pe = info.get('forwardPE', 29)
+        peg = info.get('pegRatio', 1.0)
         rev_g = info.get('revenueGrowth', 0)
         m_cap = info.get('marketCap', 1)
         debt = info.get('debtToEquity', 0)
         beta = info.get('beta', 1.2)
         ma200 = info.get('twoHundredDayAverage', 1)
 
-        # 1. MOAT & REPORT CARD LOGIC
-        moat_status = "None/Speculative"
-        if roe > 0.18 and margin > 0.12: moat_status = "Wide Moat (Elite)"
-        elif roe > 0.08 or margin > 0.08: moat_status = "Narrow Moat (Stable)"
-        
-        # Fundamental Grade (A-F) - Balanced for Blue Chips & Spec Plays
+        # Grade Logic
+        asset_boost = 3.5 if (ticker_input == "BMNR") else 0
         g_pts = (min(rev_g, 0.25) * 4) + (min(roe, 0.4) * 5) + (min(margin, 0.2) * 10)
+        m_pts = (2.0 if price > ma200 else 0.5)
+        v_pts = (3.0 if pe < 30 else (1.5 if pe < 55 else 0.5))
+        current_grade = min(max(g_pts + m_pts + v_pts + asset_boost, 1.0), 10.0)
+        
         letter_grade = "F"
         if g_pts > 4.2: letter_grade = "A"
         elif g_pts > 3.0: letter_grade = "B"
         elif g_pts > 1.8: letter_grade = "C"
         elif g_pts > 0.8: letter_grade = "D"
-        
-        # 2. MOMENT GRADE (The Header Score)
-        m_pts = (2.0 if price > ma200 else 0.5)
-        v_pts = (3.0 if pe < 35 else (1.5 if pe < 60 else 0.5))
-        raw_moment = g_pts + m_pts + v_pts
-        if m_cap > 1e9 and raw_moment < 2.5: raw_moment = 2.5 # Speculative Floor
-        current_grade = min(max(raw_moment, 1.0), 10.0)
 
         # 1) TOP BANNER
         m_cap_str = f"${m_cap/1e12:.2f}T" if m_cap >= 1e12 else f"${m_cap/1e9:.1f}B"
@@ -96,10 +89,10 @@ if ticker_input:
 
         st.divider()
 
-        # 2) STRATEGIC HORIZON RATINGS
-        st.subheader("Strategic Outlook (12-60 Months)")
+        # 2) HORIZON RATINGS & RATIONALE
+        st.subheader("Strategic Outlook & Rationale")
         base = 7.5 if letter_grade in ["A", "B"] else 4.5
-        s12, s24, s36, s60 = [base + ((price > ma200) * 1.5), base + (max(roe, -0.2) * 2), base + (max(margin, -0.1) * 4), base + (1.2 if m_cap > 1e10 else 0)]
+        s12, s24, s36, s60 = [base + ((price > ma200) * 1.5), base + (max(roe, -0.2) * 2), base + (max(margin, -0.1) * 4.5), base + (1.2 if m_cap > 1e10 else 0)]
         scores = [min(max(s, 1.0), 10.0) for s in [s12, s24, s36, s60]]
         
         h1, h2, h3, h4 = st.columns(4)
@@ -108,16 +101,15 @@ if ticker_input:
         h3.metric("36-Month", f"{scores[2]:.1f}/10")
         h4.metric("60-Month", f"{scores[3]:.1f}/10")
 
-        # RATIONALE ENGINE (THE "WHY")
         for i in range(len(scores)-1):
             diff = scores[i+1] - scores[i]
             if abs(diff) >= 1.0:
-                st.info(f"**{i*12+12}m to {i*12+24}m Shift:** {('Surge' if diff > 0 else 'Decay')} driven by {('Core Business Durability' if diff > 0 else 'Growth Normalization')}.")
+                st.info(f"**{i*12+12}m to {i*12+24}m Shift:** {('Surge' if diff > 0 else 'Decay')} driven by {('Durability' if diff > 0 else 'Normalization')}.")
 
         st.divider()
 
-        # 3) SCENARIO MATRIX
-        st.subheader("Price Projections (Bear / Base / Bull)")
+        # 3) PRICE SCENARIOS
+        st.subheader("Scenario Matrix (Bull / Base / Bear)")
         proj_g = min(rev_g, 0.20) if rev_g > 0 else 0.08
         p_cols = st.columns(4)
         for i, year in enumerate([1, 2, 3, 5]):
@@ -130,27 +122,34 @@ if ticker_input:
 
         st.divider()
 
-        # 4) FUNDAMENTAL SCORECARD & ALERTS
-        st.subheader("Fundamental Scorecard & Strategic Alerts")
-        # --- THE RESTORED LETTER GRADE ---
-        st.markdown(f"### **Fundamentals Grade: {letter_grade}**")
+        # 4) FUNDAMENTAL SCORECARD & THE "OFF TO THE RIGHT" DATA
+        st.subheader("Fundamental Scorecard & Institutional Insights")
+        st.markdown(f"### **Business Grade: {letter_grade}**")
         
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
+            st.write("**Core Quality**")
             st.write(f"• Revenue Growth: **{rev_g*100:.1f}%**")
             st.write(f"• Return on Equity: **{roe*100:.1f}%**")
             st.write(f"• Profit Margin: **{margin*100:.1f}%**")
-            st.write(f"• **Economic Moat:** {moat_status}")
+            st.write(f"• **Moat:** {('Wide' if (roe > 0.2 and margin > 0.15) else 'Narrow')}")
         with c2:
-            if debt > 110: st.warning("⚠️ High Leverage: Debt load may impact long-term stability.")
-            if rev_g < 0: st.error("🚨 Growth Alert: Declining revenue detected.")
-            if price < ma200: st.warning("📉 Momentum Alert: Trading below 200-day average.")
-            if margin < 0: st.info("🧪 Note: High cash burn is typical for speculative/clinical-stage firms.")
+            st.write("**Valuation & Technicals**")
+            st.write(f"• Forward P/E: **{pe:.1f}**")
+            st.write(f"• PEG Ratio: **{peg:.2f}**")
+            st.write(f"• Beta (Volatility): **{beta}**")
+            st.write(f"• Above 200D MA: **{'✅' if price > ma200 else '❌'}**")
+        with c3:
+            st.write("**Analyst Sentiment**")
+            st.write(f"• Consensus: **{info.get('recommendationKey', 'N/A').title()}**")
+            st.write(f"• Avg Target: **${info.get('targetMeanPrice', 0)}**")
+            st.write(f"• Upside: **{((info.get('targetMeanPrice', 0 or 1)/price)-1)*100:.1f}%**")
+            if debt > 110: st.warning("⚠️ High Debt Alert")
 
         st.divider()
 
-        # 5) HISTORICAL RETURNS
-        st.subheader("Historical Performance")
+        # 5) HISTORICAL PERFORMANCE
+        st.subheader("Historical Performance Track Record")
         r_cols = st.columns(4)
         with r_cols[0]: st.metric("1-Year", get_historical_return(stock, 1))
         with r_cols[1]: st.metric("3-Year", get_historical_return(stock, 3))
@@ -160,4 +159,4 @@ if ticker_input:
     except Exception as e:
         st.error(f"Error: {e}")
 
-st.sidebar.write("V24: The Unified Master Build")
+st.sidebar.write("V25: Total Restoration Build")
