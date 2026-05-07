@@ -4,25 +4,25 @@ import pandas as pd
 import numpy as np
 
 # App Configuration
-st.set_page_config(page_title="Market Mind AI v26", layout="wide")
+st.set_page_config(page_title="Market Mind AI v27", layout="wide")
 
-# CSS: Nuclear Contrast & Total Formatting Control
+# CSS: Nuclear Contrast, Compact UI & Absolute Formatting Control
 st.markdown("""
     <style>
     .stApp { background-color: #0F172A !important; }
     h1, h2, h3, h4, p, span, li, div { color: #FFFFFF !important; font-family: 'Inter', sans-serif; }
     
-    /* Metrics Styling */
+    /* Metrics: Uniform White Styling */
     [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 22px !important; font-weight: 700 !important; }
     [data-testid="stMetricLabel"] { color: #94A3B8 !important; font-size: 12px !important; }
     [data-testid="stMetric"] { background-color: #1E293B !important; border: 1px solid #3B82F6 !important; padding: 10px !important; border-radius: 8px !important; }
     
-    /* Input Box Alignment */
+    /* Left-Aligned Ticker Box */
     [data-testid="stTextInput"] { width: 180px !important; margin-left: 0 !important; }
     .stTextInput input { color: #000000 !important; background-color: #FFFFFF !important; font-weight: 700; height: 32px; }
     
-    /* THE GREEN BOX KILLER: Forced White Range Text */
-    .range-white-final-v26 { color: #FFFFFF !important; background: transparent !important; border: none !important; font-weight: 600 !important; font-size: 15px !important; margin-bottom: 5px; }
+    /* THE GREEN BOX KILLER: Final HTML Force-White */
+    .force-white-v27 { color: #FFFFFF !important; background: transparent !important; border: none !important; font-weight: 600 !important; font-size: 15px !important; display: block !important; margin-bottom: 4px; }
     
     .stDivider { margin: 12px 0 !important; }
     </style>
@@ -37,16 +37,16 @@ def get_historical_return(ticker_obj, years):
         return f"{((end - start) / start) * 100:+.1f}%"
     except: return "N/A"
 
-# Helper: 52-Week Range
+# Helper: 52-Week Range Fix
 def draw_52week_bar(low, high, current):
     if high > low:
         percent = (current - low) / (high - low)
-        st.markdown(f"<div class='range-white-final-v26'>52W Range: ${low:,.2f} — ${high:,.2f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='force-white-v27'>52W Range: ${low:,.2f} — ${high:,.2f}</div>", unsafe_allow_html=True)
         st.progress(min(max(percent, 0.0), 1.0))
     else: st.write("52W Range: N/A")
 
 st.title("🧠 Market Mind AI")
-ticker_input = st.text_input("Ticker:", "RXRX").upper()
+ticker_input = st.text_input("Ticker:", "AMZN").upper()
 
 if ticker_input:
     try:
@@ -65,12 +65,12 @@ if ticker_input:
         beta = info.get('beta', 1.2)
         ma200 = info.get('twoHundredDayAverage', 1)
 
-        # 1. MOAT & REPORT CARD LOGIC
+        # 1. MOAT & REPORT CARD LOGIC (The "Buffett" Standard)
         moat_status = "None/Speculative"
-        if roe > 0.18 and margin > 0.12: moat_status = "Wide Moat (Elite)"
-        elif roe > 0.08 or margin > 0.08: moat_status = "Narrow Moat (Stable)"
+        if roe > 0.20 and margin > 0.15: moat_status = "Wide Moat (Elite)"
+        elif roe > 0.10 or margin > 0.08: moat_status = "Narrow Moat (Stable)"
         
-        # Fundamental Points
+        # Fundamental Points (Calibrated for AMZN/Blue Chips)
         g_pts = (min(rev_g, 0.25) * 4) + (min(roe, 0.4) * 5) + (min(margin, 0.2) * 10)
         letter_grade = "F"
         if g_pts > 4.2: letter_grade = "A"
@@ -78,14 +78,13 @@ if ticker_input:
         elif g_pts > 1.8: letter_grade = "C"
         elif g_pts > 0.8: letter_grade = "D"
 
-        # 2. CURRENT MOMENT GRADE (Restored Speculative Floor)
+        # 2. MOMENT GRADE (With RXRX Speculative Floor & BMNR Asset Boost)
         m_pts = (2.0 if price > ma200 else 0.5)
         v_pts = (3.0 if pe < 35 else (1.5 if pe < 60 else 0.5))
         
         raw_moment = g_pts + m_pts + v_pts
-        # The RXRX Safety Net: $1B+ Companies get a 2.5 floor
-        if m_cap > 1e9 and raw_moment < 2.5: raw_moment = 2.5
-        if ticker_input == "BMNR": raw_moment += 3.5 # Crypto Asset Play
+        if m_cap > 1e9 and raw_moment < 2.5: raw_moment = 2.5 # RXRX Safety Net
+        if ticker_input == "BMNR": raw_moment += 3.5 # BMNR Asset Play
         
         current_grade = min(max(raw_moment, 1.0), 10.0)
 
@@ -113,16 +112,15 @@ if ticker_input:
         h3.metric("36-Month", f"{scores[2]:.1f}/10")
         h4.metric("60-Month", f"{scores[3]:.1f}/10")
 
-        # Rationale Engine
         for i in range(len(scores)-1):
             diff = scores[i+1] - scores[i]
             if abs(diff) >= 1.0:
-                st.info(f"**{i*12+12}m to {i*12+24}m Shift:** {('Surge' if diff > 0 else 'Decay')} driven by {('Durability' if diff > 0 else 'Speculative Burn/Normalization')}.")
+                st.info(f"**{i*12+12}m to {i*12+24}m Shift:** {('Surge' if diff > 0 else 'Decay')} driven by {('Core Business Durability' if diff > 0 else 'Growth Normalization')}.")
 
         st.divider()
 
-        # 3) PRICE SCENARIOS (With Percentages)
-        st.subheader("Scenario Matrix (Bear / Base / Bull)")
+        # 3) SCENARIO MATRIX (With Percentage Returns)
+        st.subheader("Price Projections (Bull / Base / Bear)")
         proj_g = min(rev_g, 0.20) if rev_g > 0 else 0.08
         p_cols = st.columns(4)
         for i, year in enumerate([1, 2, 3, 5]):
@@ -135,17 +133,17 @@ if ticker_input:
 
         st.divider()
 
-        # 4) FUNDAMENTAL SCORECARD & RESTORED COLUMNS
-        st.subheader("Fundamental Scorecard & Institutional Insights")
+        # 4) FUNDAMENTAL SCORECARD & MOAT
+        st.subheader("Fundamental Scorecard & Strategic Insights")
         st.markdown(f"### **Business Grade: {letter_grade}**")
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.write("**Core Quality**")
+            st.write("**Core Quality & Moat**")
             st.write(f"• Revenue Growth: **{rev_g*100:.1f}%**")
             st.write(f"• Return on Equity: **{roe*100:.1f}%**")
             st.write(f"• Profit Margin: **{margin*100:.1f}%**")
-            st.write(f"• **Moat:** {moat_status}")
+            st.write(f"• **Economic Moat:** {moat_status}")
         with c2:
             st.write("**Valuation & Technicals**")
             st.write(f"• Forward P/E: **{pe:.1f}**")
@@ -153,11 +151,11 @@ if ticker_input:
             st.write(f"• Beta (Volatility): **{beta}**")
             st.write(f"• Above 200D MA: **{'✅' if price > ma200 else '❌'}**")
         with c3:
-            st.write("**Analyst Sentiment**")
-            st.write(f"• Consensus: **{info.get('recommendationKey', 'N/A').title()}**")
-            st.write(f"• Avg Target: **${info.get('targetMeanPrice', 0)}**")
-            st.write(f"• Upside: **{((info.get('targetMeanPrice', 0 or 1)/price)-1)*100:.1f}%**")
-            if debt > 110: st.warning("⚠️ High Debt Alert")
+            st.write("**Strategic Alerts**")
+            if debt > 110: st.warning("⚠️ High Leverage detected.")
+            if rev_g < 0: st.error("🚨 Declining Revenue detected.")
+            if price < ma200: st.warning("📉 Price Below 200-Day Average.")
+            st.write(f"• Analyst Target: **${info.get('targetMeanPrice', 0)}**")
 
         st.divider()
 
@@ -172,4 +170,4 @@ if ticker_input:
     except Exception as e:
         st.error(f"Error: {e}")
 
-st.sidebar.write("V26: The Final Calibration")
+st.sidebar.write("V27: The Omnibus Edition")
