@@ -3,9 +3,9 @@ import yfinance as yf
 import pandas as pd
 
 # App Configuration
-st.set_page_config(page_title="Pro Stock Scorecard", layout="wide")
+st.set_page_config(page_title="High-Conviction Pro", layout="wide")
 
-st.title("🚀 Advanced High-Conviction Scorecard")
+st.title("🚀 High-Conviction AI & Infrastructure Scorecard")
 ticker = st.text_input("Enter Stock Ticker:", "NVDA").upper()
 
 if ticker:
@@ -20,78 +20,90 @@ if ticker:
         debt_to_eq = info.get('debtToEquity', 0)
         roe = info.get('returnOnEquity', 0)
         profit_margin = info.get('profitMargins', 0)
+        beta = info.get('beta', 1.0)
+        analysts = info.get('numberOfAnalystOpinions', 0)
+        rec_mean = info.get('recommendationMean', 3.0)
         ma_200 = info.get('twoHundredDayAverage', 0)
-        
-        # --- MULTI-FACTOR SCORING ENGINE ---
-        # 1. Valuation Score (0-10)
-        val_score = 10 if pe_fwd < 20 else (7 if pe_fwd < 35 else 4)
-        
-        # 2. Growth Score (0-10)
-        growth_score = 10 if rev_growth > 0.3 else (7 if rev_growth > 0.15 else 4)
-        
-        # 3. Quality/Efficiency Score (0-10)
-        qual_score = 10 if roe > 0.2 else (7 if roe > 0.1 else 4)
-        
-        # 4. Momentum Score (0-10)
-        mom_score = 10 if price > ma_200 else 5
 
-        # --- HORIZON-SPECIFIC WEIGHTING ---
-        # 12 Months: 40% Momentum, 40% Valuation, 20% Growth
-        score_12m = (mom_score * 0.4) + (val_score * 0.4) + (growth_score * 0.2)
+        # --- RISK LEVEL LOGIC ---
+        risk_score = 0
+        if debt_to_eq > 150: risk_score += 3
+        elif debt_to_eq > 80: risk_score += 1
+        if pe_fwd > 50: risk_score += 2
+        if beta > 1.5: risk_score += 2
+        if profit_margin < 0.05: risk_score += 3
         
-        # 24 Months: 50% Growth, 30% Quality, 20% Valuation
-        score_24m = (growth_score * 0.5) + (qual_score * 0.3) + (val_score * 0.2)
-        
-        # 60 Months: 60% Quality, 30% Growth, 10% Debt Health
-        debt_penalty = 1 if debt_to_eq > 100 else 0
-        score_60m = (qual_score * 0.6) + (growth_score * 0.3) + (10 * 0.1) - debt_penalty
+        risk_label = "Low" if risk_score <= 2 else ("Moderate" if risk_score <= 4 else ("High" if risk_score <= 7 else "Very High"))
+        risk_color = "green" if risk_label == "Low" else ("orange" if risk_label == "Moderate" else "red")
 
-        # --- THE DASHBOARD ---
-        col1, col2, col3 = st.columns(3)
+        # --- CONFIDENCE SCORE LOGIC ---
+        conf_val = "Medium"
+        if analysts > 15 and rec_mean < 2.5: conf_val = "High"
+        if analysts < 5: conf_val = "Low"
+
+        # --- HORIZON-SPECIFIC RATINGS (0-10) ---
+        # 12-Month: Focus on Momentum & Analyst Revisions
+        mom_factor = 10 if price > ma_200 else 4
+        rev_factor = 10 if rec_mean < 2.2 else 5
+        score_12m = (mom_factor * 0.5) + (rev_factor * 0.3) + (pe_fwd < 30) * 2
         
-        with col1:
+        # 24-Month: Focus on Growth & Execution
+        growth_factor = 10 if rev_growth > 0.25 else 5
+        margin_factor = 10 if profit_margin > 0.15 else 5
+        score_24m = (growth_factor * 0.6) + (margin_factor * 0.4)
+        
+        # 60-Month: Focus on Durability & ROE
+        roe_factor = 10 if roe > 0.2 else 5
+        debt_factor = 10 if debt_to_eq < 50 else 3
+        score_60m = (roe_factor * 0.6) + (debt_factor * 0.4)
+
+        # --- THE UI LAYOUT ---
+        st.header(f"Analysis for {ticker}")
+        
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Risk Level", risk_label)
+            st.write(f"Confidence: **{conf_val}**")
+        with m2:
             st.metric("12-Month Rating", f"{score_12m:.1f}/10")
-            st.write("Focus: Momentum & Entry Price")
-            
-        with col2:
-            st.metric("24-Month Rating", f"{score_24m:.1f}/10")
-            st.write("Focus: Business Execution")
-            
-        with col3:
+            st.write("Focus: Momentum")
+        with m3:
             st.metric("60-Month Rating", f"{score_60m:.1f}/10")
-            st.write("Focus: Long-Term Moat")
+            st.write("Focus: Durability")
 
         st.divider()
 
-        # Streamlined Bullet Points
+        # Horizon Verdicts
+        v1, v2, v3 = st.columns(3)
+        v1.info(f"**12m Outlook:** {'🟢 Bullish' if score_12m > 7 else '🟡 Neutral'}")
+        v2.success(f"**24m Outlook:** {'🟢 Strong Buy' if score_24m > 7 else '🟡 Hold'}")
+        v3.warning(f"**5y Outlook:** {'🟢 Conviction' if score_60m > 7 else '🟡 Speculative'}")
+
+        # Price Spread
+        st.subheader("Price Potential & Spread")
+        bull = price * 1.45
+        bear = price * 0.75
+        st.write(f"Current: **${price:.2f}** | Bull Case: **${bull:.2f}** (+45%) | Bear Case: **${bear:.2f}** (-25%)")
+        st.progress(0.4, text=f"Uncertainty Spread: {((bull-bear)/price)*100:.0f}%")
+
+        st.divider()
+
+        # Detailed Bullets
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("✅ Strengths")
-            if rev_growth > 0.2: st.write("• **Hyper-Growth:** Revenue expanding >20% Y/Y.")
-            if roe > 0.2: st.write("• **Capital Machine:** Excellent return on equity.")
-            if price > ma_200: st.write("• **Strong Trend:** Trading above 200-day average.")
-        
+            if rev_growth > 0.2: st.write("• **Hyper-Growth:** Strong top-line expansion.")
+            if roe > 0.15: st.write("• **Efficiency:** Management is generating high ROE.")
+            if analysts > 20: st.write("• **Institutional Backing:** High analyst coverage.")
         with c2:
             st.subheader("⚠️ Risks")
-            if pe_fwd > 40: st.write("• **Pricey:** Valuation is significantly above market average.")
-            if debt_to_eq > 100: st.write("• **Leverage:** High debt could sting in a high-rate environment.")
-            if profit_margin < 0.1: st.write("• **Thin Margins:** Little room for error in execution.")
-
-        st.divider()
-        
-        # Bull/Bear Scenario
-        st.subheader("Price Potential (Est.)")
-        st.write(f"**Current:** ${price}")
-        st.write(f"🐂 **Bull Case (24m):** ${price * 1.4:.2f} (+40%)")
-        st.write(f"🐻 **Bear Case (24m):** ${price * 0.8:.2f} (-20%)")
+            if debt_to_eq > 100: st.write("• **High Leverage:** Balance sheet is heavy with debt.")
+            if beta > 1.4: st.write("• **Volatile:** Stock swings harder than the market.")
+            if pe_fwd > 45: st.write("• **Valuation:** Paying a high premium for growth.")
 
     except Exception as e:
-        st.error("Data not available for this ticker. Try a major symbol like NVDA or RKLB.")
+        st.error("Select a ticker to see data.")
 
-st.sidebar.markdown("""
-### **How to read this:**
-- **9-10:** Rare "Conviction" Buy
-- **7-8:** Strong Core Holding
-- **5-6:** Speculative / Watchlist
-- **<5:** Avoid / Overvalued
-""")
+st.sidebar.markdown("### Decision Guardrails")
+st.sidebar.write("- **High Risk / High Score**: Sizing matters. Don't go all-in.")
+st.sidebar.write("- **Low Confidence**: Use small 'starter' positions.")
