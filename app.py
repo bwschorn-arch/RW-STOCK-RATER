@@ -4,32 +4,31 @@ import pandas as pd
 import numpy as np
 
 # App Configuration
-st.set_page_config(page_title="Market Mind AI v21", layout="wide")
+st.set_page_config(page_title="Market Mind AI v22", layout="wide")
 
-# CSS: Nuclear Contrast & "Force-White" range text
+# CSS: Nuclear Contrast & Total Formatting Control
 st.markdown("""
     <style>
     .stApp { background-color: #0F172A !important; }
     h1, h2, h3, h4, p, span, li, div { color: #FFFFFF !important; font-family: 'Inter', sans-serif; }
     
-    /* Metrics: Standardizing Look */
-    [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 22px !important; font-weight: 700 !important; }
+    /* Metrics Sizing */
+    [data-testid="stMetricValue"] { font-size: 22px !important; font-weight: 700 !important; }
     [data-testid="stMetricLabel"] { color: #94A3B8 !important; font-size: 12px !important; }
     [data-testid="stMetric"] { background-color: #1E293B !important; border: 1px solid #3B82F6 !important; padding: 10px !important; border-radius: 8px !important; }
     
-    /* Left-Aligned Ticker Box */
+    /* Left-Aligned, Narrow Ticker Box */
     [data-testid="stTextInput"] { width: 180px !important; margin-left: 0 !important; }
-    .stTextInput input { color: #000000 !important; background-color: #FFFFFF !important; font-weight: 700; }
+    .stTextInput input { color: #000000 !important; background-color: #FFFFFF !important; font-weight: 700; height: 32px; }
     
-    /* THE GREEN BOX KILLER: Forces 52W range to be plain white text */
-    .force-white {
-        color: white !important;
+    /* THE GREEN BOX KILLER: Forces 52W range to be plain white text with NO background */
+    .range-box-fix {
+        color: #FFFFFF !important;
         background-color: transparent !important;
         border: none !important;
         font-size: 16px !important;
         font-weight: 600 !important;
-        display: block !important;
-        margin-bottom: 8px !important;
+        margin-bottom: 5px !important;
     }
     
     .stDivider { margin: 12px 0 !important; }
@@ -45,16 +44,16 @@ def get_historical_return(ticker_obj, years):
         return f"{((end - start) / start) * 100:+.1f}%"
     except: return "Not Available"
 
-# Helper for 52-week range (Final HTML Fix)
+# Helper for 52-week range (Nuclear Fix for the Green Box)
 def draw_52week_bar(low, high, current):
     if high > low:
         percent = (current - low) / (high - low)
-        st.markdown(f"<div class='force-white'>52W Range: ${low:,.2f} — ${high:,.2f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='range-box-fix'>52W Range: ${low:,.2f} — ${high:,.2f}</div>", unsafe_allow_html=True)
         st.progress(min(max(percent, 0.0), 1.0))
     else: st.write("52W Range: N/A")
 
 st.title("🧠 Market Mind AI")
-ticker_input = st.text_input("Ticker:", "NVDA").upper()
+ticker_input = st.text_input("Ticker:", "AMZN").upper()
 
 if ticker_input:
     try:
@@ -69,19 +68,28 @@ if ticker_input:
         rev_g = info.get('revenueGrowth', 0)
         m_cap = info.get('marketCap', 1)
         beta = info.get('beta', 1.2)
-        debt = info.get('debtToEquity', 100)
         ma200 = info.get('twoHundredDayAverage', 1)
 
-        # Asset Play Logic (BMNR Fix)
-        asset_boost = 3.5 if (ticker_input == "BMNR") else 0
+        # --- THE CALIBRATED ENGINE V22 ---
+        # 1. MOAT STATUS
+        moat_status = "None/Speculative"
+        if roe > 0.20 and margin > 0.15: moat_status = "Wide Moat (Elite)"
+        elif roe > 0.10 or margin > 0.08: moat_status = "Narrow Moat (Stable)"
         
-        # Current Grade Calculation (1-10)
-        q_score = (max(roe, -0.5) * 5) + (max(margin, -0.5) * 10)
-        m_score = (2.5 if price > ma200 else 1.0) + (min(rev_g, 0.4) * 8)
-        v_score = 3 if pe < 30 else (2 if pe < 50 else 1)
-        raw_grade = ((q_score + m_score + v_score) / 1.7) + asset_boost
-        if m_cap < 2e9: raw_grade *= 0.85
-        current_grade = min(max(raw_grade, 1.0), 10.0)
+        # 2. FUNDAMENTALS GRADE (A-F)
+        # Calibrated for Blue Chips: 15% growth for a $2T company is an 'A'
+        g_pts = (min(rev_g, 0.25) * 4) + (min(roe, 0.4) * 5) + (min(margin, 0.2) * 10)
+        letter_grade = "F"
+        if g_pts > 4.5: letter_grade = "A"
+        elif g_pts > 3.0: letter_grade = "B"
+        elif g_pts > 2.0: letter_grade = "C"
+        elif g_pts > 1.0: letter_grade = "D"
+
+        # 3. CURRENT MOMENT GRADE (1-10)
+        # Unified with the Letter Grade logic + Momentum & Value
+        m_pts = (2.0 if price > ma200 else 0.5)
+        v_pts = (3.0 if pe < 30 else (1.5 if pe < 50 else 0.5))
+        current_grade = min(max(g_pts + m_pts + v_pts, 1.0), 10.0)
 
         # 1) TOP BANNER
         m_cap_str = f"${m_cap/1e12:.2f}T" if m_cap >= 1e12 else f"${m_cap/1e9:.1f}B"
@@ -97,8 +105,8 @@ if ticker_input:
 
         # 2) STRATEGIC HORIZON RATINGS
         st.subheader("Strategic Outlook (12-60 Months)")
-        base = 7.0 if (m_cap > 5e11 or roe > 0.15) else 4.5
-        s12, s24, s36, s60 = [base + ((price > ma200) * 1.5), base + (max(roe, -0.2) * 2.5), base + (max(margin, -0.2) * 4.5), base + (1.2 if m_cap > 1e10 else 0)]
+        base = 7.5 if letter_grade in ["A", "B"] else 4.5
+        s12, s24, s36, s60 = [base + ((price > ma200) * 1.5), base + (max(roe, -0.2) * 2.5), base + (max(margin, -0.1) * 5), base + (1.2 if m_cap > 1e10 else 0)]
         scores = [min(max(s, 1.0), 10.0) for s in [s12, s24, s36, s60]]
         
         h1, h2, h3, h4 = st.columns(4)
@@ -111,8 +119,8 @@ if ticker_input:
         rationale_list = []
         for i in range(len(scores)-1):
             diff = scores[i+1] - scores[i]
-            if abs(diff) >= 1.0:
-                rationale_list.append(f"**{i*12+12}m to {i*12+24}m Shift:** {('Surge' if diff > 0 else 'Decay')} driven by {('Core Efficiency' if diff > 0 else 'Growth Normalization')}.")
+            if abs(diff) >= 0.8:
+                rationale_list.append(f"**{i*12+12}m to {i*12+24}m Shift:** {('Surge' if diff > 0 else 'Decay')} driven by {('Core Business Durability' if diff > 0 else 'Growth Normalization')}.")
         if rationale_list:
             for r in rationale_list: st.info(r)
 
@@ -120,8 +128,8 @@ if ticker_input:
 
         # 4) PRICE PROJECTIONS (With Growth Governor)
         st.subheader("Scenario Matrix (Bear / Base / Bull)")
+        proj_g = min(rev_g, 0.22) if rev_g > 0 else 0.08 
         p_cols = st.columns(4)
-        proj_g = min(rev_g, 0.25) if rev_g > 0 else 0.08 
         for i, year in enumerate([1, 2, 3, 5]):
             base_p = price * ((1 + proj_g) ** year)
             with p_cols[i]:
@@ -132,22 +140,8 @@ if ticker_input:
 
         st.divider()
 
-        # 5) FUNDAMENTAL REPORT CARD & MOAT
+        # 5) FUNDAMENTAL SCORECARD & MOAT
         st.subheader("Fundamental Scorecard")
-        
-        # Moat Logic
-        moat_status = "None/Speculative"
-        if roe > 0.20 and margin > 0.15: moat_status = "Wide Moat (Elite)"
-        elif roe > 0.10 or margin > 0.10: moat_status = "Narrow Moat (Stable)"
-        
-        # Grade Logic
-        g_val = (min(rev_g, 0.5) * 2) + (min(roe, 0.5) * 2) + (min(margin, 0.4) * 2)
-        letter_grade = "F"
-        if g_val > 0.8: letter_grade = "A"
-        elif g_val > 0.5: letter_grade = "B"
-        elif g_val > 0.3: letter_grade = "C"
-        elif g_val > 0.1: letter_grade = "D"
-
         c1, c2 = st.columns(2)
         with c1:
             st.write(f"• Revenue Growth: **{rev_g*100:.1f}%**")
@@ -157,7 +151,7 @@ if ticker_input:
         with c2:
             st.write(f"• **Economic Moat:** {moat_status}")
             st.write(f"### **Fundamentals Grade: {letter_grade}**")
-            if debt > 120: st.warning("⚠️ High Debt Leverage detected.")
+            if debt > 120: st.warning("⚠️ High Leverage detected on balance sheet.")
 
         st.divider()
 
@@ -172,4 +166,4 @@ if ticker_input:
     except Exception as e:
         st.error(f"Error: {e}")
 
-st.sidebar.write("V21: The Report Card Build")
+st.sidebar.write("V22: The Calibrated Build")
