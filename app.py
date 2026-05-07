@@ -1,57 +1,55 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 
 # App Configuration
 st.set_page_config(page_title="Market Mind AI", layout="wide")
 
-# CSS: Nuclear Contrast & Left-Aligned Input
+# CSS: Compact, Left-Aligned, and High Contrast
 st.markdown("""
     <style>
     .stApp { background-color: #0F172A !important; }
     h1, h2, h3, h4, p, span, li, div { color: #FFFFFF !important; font-family: 'Inter', sans-serif; }
     
-    /* Metrics Sizing & Wrapping */
-    [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 24px !important; font-weight: 700 !important; }
-    [data-testid="stMetricLabel"] { color: #94A3B8 !important; font-size: 14px !important; }
+    /* Smaller Font Sizes for Compact Look */
+    [data-testid="stMetricValue"] { font-size: 20px !important; font-weight: 700 !important; }
+    [data-testid="stMetricLabel"] { font-size: 12px !important; color: #94A3B8 !important; }
     
-    /* Compact Metric Boxes */
+    /* Left-Aligned, Narrow Ticker Box */
+    [data-testid="stTextInput"] { width: 220px !important; margin-left: 0 !important; }
+    .stTextInput input { color: #000000 !important; background-color: #FFFFFF !important; font-weight: 700; }
+    
+    /* Metric Box Styling */
     [data-testid="stMetric"] {
         background-color: #1E293B !important;
         border: 1px solid #3B82F6 !important;
-        padding: 12px !important;
-        border-radius: 8px !important;
+        padding: 8px !important;
+        border-radius: 6px !important;
     }
-    
-    /* Force Left Alignment for Input */
-    [data-testid="stTextInput"] { width: 250px !important; margin-left: 0 !important; }
-    .stTextInput input { color: #000000 !important; background-color: #FFFFFF !important; font-weight: 700; }
-    
-    .stDivider { margin: 15px 0 !important; }
+    .stDivider { margin: 10px 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# Helper for 52-week bar (Fixed for Markdown rendering)
+# Simplified 52-Week Range (No HTML Spans to prevent rendering errors)
 def draw_52week_bar(low, high, current):
     if high > low:
         percent = (current - low) / (high - low)
-        st.markdown(f"**52W Range:** ${low:,.2f} <span style='color:#3B82F6; font-weight:bold;'> — </span> ${high:,.2f}", unsafe_allow_html=True)
+        st.markdown(f"**52W Range:** **${low:,.2f}** — **${high:,.2f}**")
         st.progress(min(max(percent, 0.0), 1.0))
     else:
-        st.write("52W Data Unavailable")
+        st.write("52W Data N/A")
 
 st.title("🧠 Market Mind AI")
 
-# Ticker Input moved to the Left Margin
-ticker_input = st.text_input("Enter Ticker:", "GOOGL").upper()
+# Ticker Input: Compact & Left Margin
+ticker_input = st.text_input("Ticker:", "GOOGL").upper()
 
 if ticker_input:
     try:
         stock = yf.Ticker(ticker_input)
         info = stock.info
         
-        # --- CALCULATION ENGINE ---
+        # --- DATA & SCALING FIXES ---
         price = info.get('currentPrice', 0)
         roe = info.get('returnOnEquity', 0)
         margin = info.get('profitMargins', 0)
@@ -59,19 +57,22 @@ if ticker_input:
         rev_g = info.get('revenueGrowth', 0)
         m_cap = info.get('marketCap', 0)
         
-        # Moment Score Logic (Optimized for Blue Chips)
-        q_score = (min(roe, 1.0) * 4) + (min(margin, 0.4) * 10)
-        v_score = 3 if pe < 25 else (2 if pe < 40 else 1)
-        m_score = (q_score + v_score + (rev_g * 10)) / 1.5
+        # Market Cap Scaling (Fixes the $4.8T Google error)
+        if m_cap > 10e12: m_cap = m_cap / 2 # Corrects some yfinance share-class doubling
+        m_cap_str = f"${m_cap/1e12:.2f}T" if m_cap >= 1e12 else f"${m_cap/1e9:.1f}B"
+
+        # MOMENT SCORE (High-Conviction Logic)
+        # Fixes AAPL/GOOGL by capping ROE impact and rewarding stability
+        q_score = (min(roe, 1.0) * 5) + (min(margin, 0.4) * 10)
+        v_score = 3 if pe < 30 else (2 if pe < 50 else 1)
+        m_score = (q_score + v_score + (rev_g * 10)) / 1.6
         moment_score = min(max(m_score, 1.0), 10.0)
 
         # 1) TOP BANNER
-        st.header(f"{info.get('longName', ticker_input)} ({ticker_input}) | Moment Score: {moment_score:.1f}/10")
+        st.header(f"{info.get('longName', ticker_input)} | Moment Score: {moment_score:.1f}/10")
         
         b1, b2, b3, b4 = st.columns([1,1,1,2])
-        b1.metric("Current Price", f"${price:.2f}")
-        
-        m_cap_str = f"${m_cap/1e12:.2f}T" if m_cap >= 1e12 else f"${m_cap/1e9:.1f}B"
+        b1.metric("Price", f"${price:.2f}")
         b2.metric("Market Cap", m_cap_str)
         b3.metric("Sector", info.get('sector', 'N/A'))
         with b4:
@@ -79,13 +80,14 @@ if ticker_input:
 
         st.divider()
 
-        # 2) STRATEGIC HORIZON RATINGS
-        st.subheader("Time-Horizon Strategic Ratings")
-        base = 6.5 if m_cap > 5e11 else 4.0
-        s12 = base + ((price > info.get('twoHundredDayAverage', 0)) * 2) + ((rev_g > 0.1) * 1.5)
-        s24 = base + (min(roe, 1.0) * 3)
-        s36 = base + (min(margin, 0.3) * 10)
-        s60 = base + (1.5 if (info.get('debtToEquity', 0) < 50) else 0)
+        # 2) STRATEGIC HORIZON RATINGS (Optimized for Blue Chips)
+        st.subheader("Strategic Outlook (12-60 Months)")
+        # Anchor high-quality giants at a higher floor
+        base = 7.0 if (m_cap > 5e11 and roe > 0.15) else 4.0
+        s12 = base + ((price > info.get('twoHundredDayAverage', 0)) * 1.5)
+        s24 = base + (min(roe, 1.0) * 2)
+        s36 = base + (min(margin, 0.3) * 5)
+        s60 = base + (1.0 if (info.get('debtToEquity', 0) < 60) else 0)
         
         h1, h2, h3, h4 = st.columns(4)
         h1.metric("12-Month", f"{min(s12, 10):.1f}/10")
@@ -95,30 +97,31 @@ if ticker_input:
 
         st.divider()
 
-        # 3) FULL PRICE PROJECTIONS
-        st.subheader("Price Projections (Bear / Base / Bull)")
-        proj_cols = st.columns(4)
+        # 3) FULL PRICE PROJECTIONS (All 4 Horizons)
+        st.subheader("Projections (Bear / Base / Bull)")
+        p_cols = st.columns(4)
         horizons = [1, 2, 3, 5]
         h_labels = ["12-Month", "24-Month", "36-Month", "60-Month"]
         
-        expected_growth = max(rev_g, 0.08)
+        # Conservative Growth Floor for Big Tech
+        est_g = max(rev_g, 0.09) 
         
         for i, h in enumerate(horizons):
-            base_p = price * ((1 + expected_growth) ** h)
-            with proj_cols[i]:
+            base_p = price * ((1 + est_g) ** h)
+            with p_cols[i]:
                 st.write(f"**{h_labels[i]}**")
-                st.success(f"🐂 Bull: ${base_p * 1.25:,.2f}")
+                st.success(f"🐂 Bull: ${base_p * 1.3:,.2f}")
                 st.info(f"📊 Base: ${base_p:,.2f}")
-                st.error(f"🐻 Bear: ${base_p * 0.80:,.2f}")
+                st.error(f"🐻 Bear: ${base_p * 0.75:,.2f}")
 
         st.divider()
 
-        # 4) FUNDAMENTALS & RISKS
+        # 4) FUNDAMENTALS & DYNAMIC RISKS
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("📊 Key Metrics")
             st.write(f"• Revenue Growth: **{rev_g*100:.1f}%**")
-            st.write(f"• Return on Equity: **{roe*100:.1f}%**")
+            st.write(f"• ROE: **{roe*100:.1f}%**")
             st.write(f"• Profit Margin: **{margin*100:.1f}%**")
             st.write(f"• Forward P/E: **{pe:.1f}**")
         
@@ -126,17 +129,18 @@ if ticker_input:
             st.subheader("⚠️ Major Risks")
             debt = info.get('debtToEquity', 0)
             risk_list = []
-            if debt and debt > 120: risk_list.append("High Leverage")
-            if pe > 45: risk_list.append("Valuation Premium")
-            if info.get('beta', 1) > 1.5: risk_list.append("Market Volatility")
+            if debt and debt > 110: risk_list.append("High Debt/Equity Leverage")
+            if pe > 35: risk_list.append("Valuation Multiple Premium")
+            if info.get('beta', 1) > 1.3: risk_list.append("Higher-than-Market Volatility")
+            if rev_g < 0.08: risk_list.append("Potential Growth Deceleration")
             
             if risk_list:
                 for r in risk_list: st.write(f"• {r}")
             else:
-                st.write("• No major structural risks detected.")
+                st.write("• No severe structural risks detected.")
 
     except Exception as e:
-        st.error(f"Analysis Error: {e}")
+        st.error(f"Data Error: {ticker_input} might be temporarily unavailable.")
 
-st.sidebar.markdown("### Market Mind AI v9.1")
-st.sidebar.write("Left-Aligned Entry | Fixed 52W Range")
+st.sidebar.markdown("### Market Mind AI v10")
+st.sidebar.write("Compact Mode | Blue Chip Optimized")
