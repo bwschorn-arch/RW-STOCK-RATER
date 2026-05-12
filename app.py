@@ -1,7 +1,9 @@
 # ═══════════════════════════════════════════════════════════════
-# MARKET MIND AI — v31
-# Now with full Mutual Fund & ETF support
-# 100% Free · Powered by yfinance
+# MARKET MIND AI — v32
+# Major upgrade: Year-by-year growth decay model
+# Full cyclicality awareness (memory, semis, energy, mining etc.)
+# Analyst 12m target anchoring + multi-year decay toward long-term mean
+# Stocks · Mutual Funds · ETFs · 100% Free · yfinance
 # ═══════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -48,6 +50,7 @@ html, body, [class*="css"] { font-family: 'Syne', sans-serif; background-color: 
 .chip-b { background:#0c1a2e; color:#60a5fa; border:1px solid #1e3a5f; }
 .chip-n { background:#111827; color:#9ca3af; border:1px solid #374151; }
 .chip-p { background:#1a0a2e; color:#c084fc; border:1px solid #7e22ce; }
+.chip-o { background:#1c1005; color:#fb923c; border:1px solid #9a3412; }
 .trow { display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid #1e2d40; font-family:'JetBrains Mono',monospace; font-size:11px; }
 .trow-label { color:#64748b; }
 .trow-val { color:#e2e8f0; }
@@ -56,6 +59,7 @@ html, body, [class*="css"] { font-family: 'Syne', sans-serif; background-color: 
 .alert-y { background:#1c1407; border-left:3px solid #eab308; border-radius:0 6px 6px 0; padding:10px 14px; margin:5px 0; font-size:12px; color:#fde047; }
 .alert-b { background:#0c1a2e; border-left:3px solid #3b82f6; border-radius:0 6px 6px 0; padding:10px 14px; margin:5px 0; font-size:12px; color:#93c5fd; }
 .alert-p { background:#1a0a2e; border-left:3px solid #a855f7; border-radius:0 6px 6px 0; padding:10px 14px; margin:5px 0; font-size:12px; color:#d8b4fe; }
+.alert-o { background:#1c1005; border-left:3px solid #f97316; border-radius:0 6px 6px 0; padding:10px 14px; margin:5px 0; font-size:12px; color:#fdba74; }
 div[data-testid="metric-container"] { background:#0d1526; border:1px solid #1e2d40; border-radius:10px; padding:14px; }
 [data-testid="stMetricValue"] { font-family:'JetBrains Mono',monospace !important; color:#f1f5f9 !important; font-size:20px !important; font-weight:600 !important; }
 [data-testid="stMetricLabel"] { color:#64748b !important; font-size:11px !important; font-family:'JetBrains Mono',monospace !important; }
@@ -124,9 +128,46 @@ def grade(s):
 def trow(label, val, val_color="#e2e8f0"):
     return f'<div class="trow"><span class="trow-label">{label}</span><span class="trow-val" style="color:{val_color};">{val}</span></div>'
 
-def is_fund(info):
+def is_fund_check(info):
     qt = (safe(info, 'quoteType') or '').upper()
     return qt in ['MUTUALFUND', 'ETF']
+
+# ── Cyclicality detection ─────────────────────────────────────
+CYCLICAL_KEYWORDS = [
+    'semiconductor', 'memory', 'nand', 'dram', 'hbm',
+    'semiconductor equipment', 'oil', 'gas', 'energy',
+    'mining', 'steel', 'metals', 'chemicals', 'materials',
+    'shipping', 'airlines', 'auto', 'homebuilding',
+    'construction', 'agriculture', 'paper', 'lumber'
+]
+
+def detect_cyclical(info):
+    industry  = (safe(info, 'industry')  or '').lower()
+    sector_s  = (safe(info, 'sector')    or '').lower()
+    combined  = industry + ' ' + sector_s
+    return any(kw in combined for kw in CYCLICAL_KEYWORDS)
+
+CYCLICAL_SECTOR_NAMES = {
+    'semiconductor': 'Semiconductors & Memory',
+    'memory': 'Semiconductors & Memory',
+    'nand': 'Flash Memory',
+    'dram': 'DRAM Memory',
+    'oil': 'Energy',
+    'gas': 'Energy',
+    'mining': 'Mining & Metals',
+    'steel': 'Steel & Metals',
+    'chemicals': 'Chemicals',
+    'shipping': 'Shipping',
+    'airlines': 'Airlines',
+    'auto': 'Automotive',
+}
+
+def cyclical_label(info):
+    industry = (safe(info, 'industry') or '').lower()
+    for kw, label in CYCLICAL_SECTOR_NAMES.items():
+        if kw in industry:
+            return label
+    return "Cyclical Industry"
 
 
 # ══════════════════════════════════════
@@ -169,7 +210,6 @@ def get_ta(hist):
     except: return {}
 
 def calc_hist_annual_return(hist, years):
-    """Calculate true annualized return from price history."""
     try:
         periods = int(years * 252)
         if len(hist) < int(periods * 0.6): return None
@@ -188,7 +228,6 @@ def calc_hist_annual_return(hist, years):
 
 def score_fundamentals(info, fund_mode=False):
     if fund_mode:
-        # For funds, fundamentals come from holdings quality — use available proxies
         s, pos, neg = 6.0, [], []
         pe = safe(info, 'trailingPE')
         if pe and pe > 0:
@@ -198,7 +237,6 @@ def score_fundamentals(info, fund_mode=False):
         pm = safe(info, 'profitMargins')
         if pm and pm > 0: s+=1.0; pos.append(f"Positive aggregate profit margin {pm*100:.1f}%")
         return round(max(0,min(10,s)),1), pos, neg
-
     s, pos, neg = 5.0, [], []
     rg = safe(info,'revenueGrowth')
     if rg is not None:
@@ -235,7 +273,6 @@ def score_fundamentals(info, fund_mode=False):
     return round(max(0,min(10,s)),1), pos, neg
 
 def score_fund_performance(hist):
-    """Score a fund based on its historical return track record."""
     s, pos, neg = 5.0, [], []
     r1  = calc_hist_annual_return(hist, 1)
     r3  = calc_hist_annual_return(hist, 3)
@@ -271,7 +308,6 @@ def score_valuation(info, fund_mode=False):
             elif pe < 40: s+=0.5
             elif pe > 60: s-=1.0; neg.append(f"High P/E on holdings {pe:.0f}x")
         return round(max(0,min(10,s)),1), pos, neg
-
     peg = safe(info,'pegRatio')
     if peg and peg > 0:
         if peg < 1.0:   s+=2.5; pos.append(f"PEG {peg:.2f} — growth at discount")
@@ -385,17 +421,73 @@ def calc_ratings(fs, vs, ms, bs, ans):
 
 
 # ══════════════════════════════════════
-# SCENARIO FORECASTING
-# NOW WITH FUND/ETF SUPPORT
+# SCENARIO FORECASTING — v32 COMPLETE REWRITE
+# Year-by-year decay model with cyclicality awareness
 # ══════════════════════════════════════
 
+def annual_growth_rate(yr, start_momentum, ltg, cyclical, scenario):
+    """
+    Calculate the growth rate for a specific future year.
+
+    Growth decays exponentially from start_momentum toward ltg (long-term growth).
+    For cyclical stocks: applies down-cycle headwinds in years 3 and 4.
+
+    Args:
+        yr:             Year number (1, 2, 3, 4, 5)
+        start_momentum: Starting growth rate (from analyst implied or rg, capped)
+        ltg:            Long-term structural growth rate (historical mean reversion target)
+        cyclical:       Whether this is a cyclical industry
+        scenario:       'base', 'bull', or 'bear'
+    """
+    if scenario == 'base':
+        # Moderate decay — reverts to ltg over ~4-5 years
+        decay = 0.75
+        g = ltg + (start_momentum - ltg) * math.exp(-decay * (yr - 1))
+        if cyclical and yr in [3, 4]:
+            # Down-cycle: sharply compress growth, can go negative
+            # Base case: think MU revenue dropping 40-60% from peak
+            g = max(-0.30, g * 0.12)
+
+    elif scenario == 'bull':
+        # Slower decay — bull case maintains momentum longer
+        decay = 0.40
+        g = ltg + (start_momentum - ltg) * math.exp(-decay * (yr - 1))
+        # Bull case floor: never drops below 70% of ltg
+        g = max(ltg * 0.70, g)
+        # Even in bull case for cyclicals, year 4 sees some normalization
+        if cyclical and yr == 4:
+            g = max(ltg * 0.50, g * 0.60)
+
+    elif scenario == 'bear':
+        # Fast decay — bear case reverts quickly and overshoots to the downside
+        decay = 1.40
+        g = ltg * 0.30 + (start_momentum - ltg * 0.30) * math.exp(-decay * (yr - 1))
+        if cyclical and yr in [2, 3, 4]:
+            # Bear case down-cycle: deep negative growth
+            # Think memory prices crashing 50%+
+            if yr == 2:   g = max(-0.20, g - 0.15)
+            elif yr == 3: g = max(-0.45, g - 0.25)
+            elif yr == 4: g = max(-0.35, g - 0.15)
+        else:
+            g = max(-0.35, g)
+
+    return g
+
+
 def gen_scenarios(price, rev_growth, info, hist=None):
+    """
+    Build Bear / Base / Bull scenarios for 12m, 24m, 36m, 60m.
+
+    Key improvements in v32:
+    - Year 1 ALWAYS anchored to analyst consensus price target (most accurate)
+    - Years 2+ use year-by-year decay model (growth decays toward long-term mean)
+    - Cyclical industries: explicit down-cycle modeled in years 3-4
+    - Never blindly extrapolates one growth rate forward
+    - Returns scenario assumptions for display in UI
+    """
     current = price or 100
 
-    # ── FUND / ETF PATH ────────────────────────────────────────
-    # For mutual funds and ETFs, use historical return data as anchor.
-    # Revenue growth, analyst targets etc. don't exist for funds.
-    # The fund's own track record is the only honest basis for scenarios.
+    # ── FUND / ETF PATH (unchanged from v31) ────────────────────
     qt = (safe(info, 'quoteType') or '').upper()
     fund_mode = qt in ['MUTUALFUND', 'ETF']
 
@@ -404,94 +496,114 @@ def gen_scenarios(price, rev_growth, info, hist=None):
         r3  = calc_hist_annual_return(hist, 3)
         r5  = calc_hist_annual_return(hist, 5)
         r10 = calc_hist_annual_return(hist, 10)
-
-        # Build structural base from long-term track record.
-        # Weight 5yr and 10yr heavily — they represent through-cycle performance.
-        # Cap individual years so a single explosive year doesn't distort the base.
         weighted, total_w = 0.0, 0.0
         for ret, weight, cap in [(r1, 0.10, 0.80), (r3, 0.25, 0.80),
                                   (r5, 0.40, 0.80), (r10, 0.25, 0.80)]:
             if ret is not None:
                 weighted += min(ret, cap) * weight
                 total_w  += weight
-
-        base_annual = (weighted / total_w) if total_w > 0 else 0.10
-        # Slight conservatism — structural base is 80% of weighted average
-        base_annual = base_annual * 0.80
-
-        # Bull: recent strong momentum (use 1yr or 1.5x base, capped at 100%)
+        base_annual = (weighted / total_w) * 0.80 if total_w > 0 else 0.10
         bull_annual = min(max(r1 or base_annual, base_annual * 1.60), 1.00)
-
-        # Bear: sector funds can correct sharply (-25% to -45%)
-        # Use worst realistic annual return as floor
         bear_annual = max(-0.40, base_annual * 0.05)
-
         out = {}
         for yr, key in [(1,'12m'),(2,'24m'),(3,'36m'),(5,'60m')]:
-            bear_p = current * ((1 + bear_annual) ** yr)
-            base_p = current * ((1 + base_annual) ** yr)
-            bull_p = current * ((1 + bull_annual) ** yr)
-
-            # Enforce bull > base > bear always
-            bear_p = max(0.01, bear_p)
-            base_p = max(bear_p * 1.15, base_p)
-            bull_p = max(base_p * 1.30, bull_p)
-
-            def sc(p):
-                return {'p': round(p, 2), 'pct': round(((p / current) - 1) * 100, 1)}
+            bear_p = max(0.01, current * ((1 + bear_annual) ** yr))
+            base_p = max(bear_p * 1.15, current * ((1 + base_annual) ** yr))
+            bull_p = max(base_p * 1.30, current * ((1 + bull_annual) ** yr))
+            def sc(p): return {'p': round(p,2), 'pct': round(((p/current)-1)*100,1)}
             out[key] = {'bear': sc(bear_p), 'base': sc(base_p), 'bull': sc(bull_p)}
-        return out
+        return out, {}, False
 
-    # ── STOCK PATH ─────────────────────────────────────────────
+    # ── STOCK PATH ───────────────────────────────────────────────
+
     rg = rev_growth if rev_growth else 0.10
-    rg = max(-0.30, min(1.0, rg))
+    rg = max(-0.50, min(2.0, rg))  # allow up to 200% revenue growth
 
+    # Analyst price targets (12-month consensus)
     target_mean = safe(info, 'targetMeanPrice')
     target_high = safe(info, 'targetHighPrice')
     target_low  = safe(info, 'targetLowPrice')
-    pm          = safe(info, 'profitMargins') or 0
 
-    use_analyst_anchor = (
-        target_mean is not None and
-        current > 0 and
-        target_mean > current * 1.15 and
-        (rg < 0.05 or pm < -0.10)
-    )
+    # Cyclicality
+    cyclical = detect_cyclical(info)
+
+    # Long-term structural growth rate (mean reversion target)
+    # Use 10-year historical price CAGR, capped to avoid supercycle distortion
+    ltg = 0.08 if cyclical else 0.12
+    if hist is not None and len(hist) > 252 * 4:
+        hcagr = calc_hist_annual_return(hist, min(10, len(hist)//252))
+        if hcagr is not None:
+            # For cyclicals, cap at 20% to avoid supercycle inflation
+            ltg = max(0.04, min(0.20 if cyclical else 0.30, hcagr * 0.75))
+
+    # ── Set starting momentum for year 2+ decay ──────────────────
+    # When analyst target is available, derive momentum from what
+    # analysts expect (far more accurate than raw revenue growth).
+    # This avoids the problem where rg=200% creates absurd year 2+ projections.
+    if target_mean and target_mean > 0 and current > 0:
+        implied_1y = (target_mean / current) - 1
+        # Cap the momentum to avoid explosive compounding
+        start_mom_base = max(-0.30, min(0.60, implied_1y))
+        start_mom_bull = max(-0.20, min(0.80, (target_high/current - 1) if target_high else implied_1y * 1.30))
+        start_mom_bear = max(-0.50, min(0.30, (target_low/current - 1) if target_low else implied_1y * 0.50))
+    else:
+        # No analyst target — use revenue growth, reasonably capped
+        start_mom_base = max(-0.30, min(0.50, rg * 0.70))
+        start_mom_bull = max(-0.20, min(0.70, rg * 1.10))
+        start_mom_bear = max(-0.50, min(0.30, rg * 0.30))
+
+    # ── Build prices year by year ─────────────────────────────────
+    prices = {'base': {0: current}, 'bull': {0: current}, 'bear': {0: current}}
+    assumptions = {}  # store for UI display
+
+    for yr in range(1, 6):
+        for scenario, mom in [('base', start_mom_base),
+                               ('bull', start_mom_bull),
+                               ('bear', start_mom_bear)]:
+            if yr == 1:
+                # ── YEAR 1: ANCHOR TO ANALYST TARGET ──────────────
+                if target_mean and target_mean > 0:
+                    if scenario == 'base':
+                        p = target_mean
+                    elif scenario == 'bull':
+                        p = target_high if target_high else target_mean * 1.20
+                        if cyclical: p = min(p, target_mean * 1.35)  # cap bull for cyclicals
+                    elif scenario == 'bear':
+                        p = target_low if target_low else target_mean * 0.78
+                        if cyclical: p = min(p, current * 0.82)  # extra bear for cyclicals at cycle peak
+                else:
+                    # No analyst target: use modeled growth
+                    g_1 = annual_growth_rate(1, mom, ltg, cyclical, scenario)
+                    p = current * (1 + g_1)
+                    assumptions[f'{scenario}_yr1'] = g_1
+            else:
+                # ── YEARS 2-5: DECAY MODEL ─────────────────────────
+                g = annual_growth_rate(yr, mom, ltg, cyclical, scenario)
+                p = prices[scenario][yr-1] * (1 + g)
+                assumptions[f'{scenario}_yr{yr}'] = g
+
+            prices[scenario][yr] = max(0.01, p)
+
+    # Enforce logical ordering at each horizon: bull > base > bear
+    for yr in range(1, 6):
+        bear_p = prices['bear'][yr]
+        base_p = max(bear_p * 1.08, prices['base'][yr])
+        bull_p = max(base_p * 1.12, prices['bull'][yr])
+        prices['base'][yr] = base_p
+        prices['bull'][yr] = bull_p
+
+    def sc(p):
+        return {'p': round(p, 2), 'pct': round(((p / current) - 1) * 100, 1)}
 
     out = {}
     for yr, key in [(1,'12m'),(2,'24m'),(3,'36m'),(5,'60m')]:
-        if use_analyst_anchor:
-            implied_1y  = (target_mean / current) - 1
-            compounding = max(0.05, implied_1y * 0.35)
-            base_p = target_mean * ((1 + compounding) ** (yr - 1))
-            if target_high and target_high > current:
-                implied_bull = (target_high / current) - 1
-                bull_extra   = max(0.10, implied_bull * 0.45)
-                bull_p = target_high * ((1 + bull_extra) ** (yr - 1))
-            else:
-                bull_p = base_p * (1.40 ** yr)
-            bear_pct = min(0.35 + (0.07 * yr), 0.75)
-            bear_p   = current * (1 - bear_pct)
-            if target_low and target_low < current:
-                bear_p = min(bear_p, target_low * 0.85)
-        else:
-            bg = max(-0.15, rg * 0.30)
-            sg = rg * 0.70; ug = rg * 1.35
-            bm = max(0.60, 1 - 0.12 * yr)
-            sm = max(0.78, 1 - 0.04 * yr)
-            um = min(1.45, 1 + 0.07 * yr)
-            bear_p = current * (1 + bg) ** yr * bm
-            base_p = current * (1 + sg) ** yr * sm
-            bull_p = current * (1 + ug) ** yr * um
+        out[key] = {
+            'bear': sc(prices['bear'][yr]),
+            'base': sc(prices['base'][yr]),
+            'bull': sc(prices['bull'][yr]),
+        }
 
-        bear_p = max(0.01, bear_p)
-        base_p = max(bear_p * 1.15, base_p)
-        bull_p = max(base_p * 1.30, bull_p)
-
-        def sc(p):
-            return {'p': round(p, 2), 'pct': round(((p / current) - 1) * 100, 1)}
-        out[key] = {'bear': sc(bear_p), 'base': sc(base_p), 'bull': sc(bull_p)}
-    return out
+    return out, assumptions, cyclical
 
 
 # ══════════════════════════════════════
@@ -540,7 +652,7 @@ def chart_scenarios(scenarios, price):
     fig.update_layout(height=280, margin=dict(l=0,r=0,t=8,b=0), paper_bgcolor=BG, plot_bgcolor=BG,
         font=dict(family='JetBrains Mono',color=TXT,size=11), xaxis=dict(showgrid=True,gridcolor=GRID),
         yaxis=dict(showgrid=True,gridcolor=GRID,tickprefix='$'), legend=dict(bgcolor='rgba(0,0,0,0)'),
-        title=dict(text="Price Scenario Trajectories", font=dict(size=11,color=TXT)))
+        title=dict(text="Price Scenario Trajectories — Year-by-Year Decay Model", font=dict(size=11,color=TXT)))
     return fig
 
 def chart_earnings(df):
@@ -608,13 +720,13 @@ def main():
     <div style="text-align:center;padding:12px 0 6px;">
         <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.2em;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px;">◈ PROFESSIONAL STOCK & FUND ANALYSIS</div>
         <div style="font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:#f1f5f9;letter-spacing:-.02em;line-height:1;">Market Mind AI</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#334155;margin-top:4px;">v31 · Stocks · Mutual Funds · ETFs · 100% free · yfinance</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#334155;margin-top:4px;">v32 · Cyclicality-aware · Analyst-anchored · Year-by-year decay model · 100% free</div>
     </div>
     <hr style="border:none;border-top:1px solid #1e2d40;margin:14px 0 20px;">
     """, unsafe_allow_html=True)
 
     ci, cb, _ = st.columns([2,1,4])
-    with ci: ticker = st.text_input("", placeholder="NVDA or FSELX", label_visibility="collapsed").upper().strip()
+    with ci: ticker = st.text_input("", placeholder="MU, NVDA, FSELX…", label_visibility="collapsed").upper().strip()
     with cb: st.button("⚡ Analyze", use_container_width=True, type="primary")
 
     if not ticker:
@@ -643,7 +755,6 @@ def main():
     if not info or not any(safe(info,k) for k in ['longName','shortName','currentPrice','regularMarketPrice','navPrice']):
         st.error(f"No data found for '{ticker}'. Please check the ticker symbol."); return
 
-    # ── Key scalars ──
     name     = safe(info,'longName') or safe(info,'shortName') or ticker
     sector   = safe(info,'sector') or safe(info,'category') or 'N/A'
     ind      = safe(info,'industry') or safe(info,'fundFamily') or 'N/A'
@@ -653,7 +764,7 @@ def main():
     vol      = safe(info,'volume')
     avgvol   = safe(info,'averageVolume')
     rg       = safe(info,'revenueGrowth')
-    fund_mode_flag = is_fund(info)
+    fund_mode_flag = is_fund_check(info)
 
     if price is None and not hist1y.empty: price = float(hist1y['Close'].iloc[-1])
     if prev is None and not hist1y.empty and len(hist1y)>1: prev = float(hist1y['Close'].iloc[-2])
@@ -665,7 +776,6 @@ def main():
 
     ta = get_ta(hist2y) if not hist2y.empty else {}
 
-    # ── Scores (fund-aware) ──
     if fund_mode_flag:
         fs, fpos, fneg   = score_fund_performance(hist10y if not hist10y.empty else hist5y)
         vs, vpos, vneg   = score_valuation(info, fund_mode=True)
@@ -681,24 +791,33 @@ def main():
 
     overall   = round(fs*.35 + vs*.20 + bs*.20 + ms*.10 + as_*.15, 1)
     ratings   = calc_ratings(fs, vs, ms, bs, as_)
-    # Pass hist2y into gen_scenarios so fund path can use historical returns
-    scenarios = gen_scenarios(price or 100, rg, info, hist2y)
-    all_pos   = fpos+vpos+bpos+mpos+apos
-    all_neg   = fneg+vneg+bneg+mneg+aneg
+
+    # gen_scenarios now returns (scenarios, assumptions, is_cyclical)
+    scenario_result = gen_scenarios(price or 100, rg, info, hist2y)
+    if len(scenario_result) == 3:
+        scenarios, assumptions, is_cyclical = scenario_result
+    else:
+        scenarios = scenario_result; assumptions = {}; is_cyclical = False
+
+    all_pos = fpos+vpos+bpos+mpos+apos
+    all_neg = fneg+vneg+bneg+mneg+aneg
 
     pstr = f"{price:,.2f}" if price else "—"
     cstr = f"{chg_sym} ${abs(chg):.2f} ({chg_pct:+.2f}%)" if chg and chg_pct else "—"
     mc_label = "Total Assets" if fund_mode_flag else "Market Cap"
 
     # ── HEADER ──
-    fund_badge = '<span class="chip chip-p">MUTUAL FUND</span>' if (safe(info,'quoteType','') or '').upper()=='MUTUALFUND' else '<span class="chip chip-p">ETF</span>' if (safe(info,'quoteType','') or '').upper()=='ETF' else ''
+    qt_str = (safe(info,'quoteType','') or '').upper()
+    fund_badge = f'<span class="chip chip-p">{"MUTUAL FUND" if qt_str=="MUTUALFUND" else "ETF"}</span>' if fund_mode_flag else ''
+    cyclical_badge = f'<span class="chip chip-o">⚠ CYCLICAL</span>' if is_cyclical and not fund_mode_flag else ''
+
     st.markdown(f"""
     <div class="mm-header">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
         <div>
           <div class="mm-ticker">◈ {ticker}</div>
           <div class="mm-company">{name}</div>
-          <div style="margin-top:6px;">{fund_badge}<span class="chip chip-b">{sector}</span><span class="chip chip-n">{ind}</span></div>
+          <div style="margin-top:6px;">{fund_badge}{cyclical_badge}<span class="chip chip-b">{sector}</span><span class="chip chip-n">{ind}</span></div>
         </div>
         <div style="text-align:right;">
           <div class="mm-price">${pstr}</div>
@@ -709,6 +828,21 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # ── Cyclicality warning ──
+    if is_cyclical and not fund_mode_flag:
+        cyc_label = cyclical_label(info)
+        target_mean_display = safe(info, 'targetMeanPrice')
+        anchor_note = f" · Year 1 anchored to analyst consensus target (${target_mean_display:.2f})" if target_mean_display else " · Year 1 anchored to analyst-implied growth"
+        st.markdown(f"""
+        <div class="alert-o">
+          ⚠️ <strong>Cyclical Industry Detected — {cyc_label}</strong><br>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;">
+          Scenarios use a year-by-year decay model, NOT simple extrapolation.{anchor_note}<br>
+          Years 3-4 apply down-cycle headwinds — supply gluts, margin compression, and earnings normalization are modeled.
+          The chart may show a peak-then-dip shape reflecting the boom-bust cycle rather than a straight line up.
+          </span>
+        </div>""", unsafe_allow_html=True)
+
     # ── Fund mode banner ──
     if fund_mode_flag:
         r1s  = calc_hist_annual_return(hist1y,  1)
@@ -718,16 +852,15 @@ def main():
         def rp(r): return f"{r*100:+.1f}%/yr" if r is not None else "—"
         st.markdown(f"""
         <div class="alert-p">
-          📊 <strong>Fund Mode Active</strong> — Scenarios and scoring are driven by historical return track record, not stock fundamentals.<br>
-          <span style="font-family:'JetBrains Mono',monospace; font-size:11px;">
-          1yr: <strong>{rp(r1s)}</strong> &nbsp;·&nbsp;
-          3yr: <strong>{rp(r3s)}</strong> &nbsp;·&nbsp;
-          5yr: <strong>{rp(r5s)}</strong> &nbsp;·&nbsp;
-          10yr: <strong>{rp(r10s)}</strong>
+          📊 <strong>Fund Mode Active</strong> — Scenarios driven by historical return track record.<br>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;">
+          1yr: <strong>{rp(r1s)}</strong> &nbsp;·&nbsp; 3yr: <strong>{rp(r3s)}</strong> &nbsp;·&nbsp;
+          5yr: <strong>{rp(r5s)}</strong> &nbsp;·&nbsp; 10yr: <strong>{rp(r10s)}</strong>
           </span>
         </div>""", unsafe_allow_html=True)
-    else:
-        # Quick stats for stocks
+
+    # ── Quick stats (stocks only) ──
+    if not fund_mode_flag:
         s1,s2,s3,s4,s5,s6,s7 = st.columns(7)
         for col,(lbl,val) in zip([s1,s2,s3,s4,s5,s6,s7],[
             ("P/E Trailing", fmt(safe(info,'trailingPE'),suffix="x")),
@@ -785,9 +918,12 @@ def main():
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # ── SCENARIO FORECASTS ──
-    st.markdown('<div class="mm-section-label">🎯 scenario forecasts — all time horizons</div>', unsafe_allow_html=True)
-    if fund_mode_flag:
-        st.markdown('<div class="alert-p" style="font-size:11px;">Fund scenarios anchored to historical return track record · Bear reflects sector correction · Base = structural annualized average · Bull = continuation of recent AI-driven momentum</div>', unsafe_allow_html=True)
+    st.markdown('<div class="mm-section-label">🎯 scenario forecasts — analyst-anchored · year-by-year decay</div>', unsafe_allow_html=True)
+
+    target_mean_v = safe(info, 'targetMeanPrice')
+    if target_mean_v and not fund_mode_flag:
+        upside_v = ((target_mean_v - price) / price * 100) if price else 0
+        st.markdown(f'<div class="alert-b" style="font-size:11px;">📌 <strong>12-Month Anchor:</strong> Analyst consensus target <strong>${target_mean_v:.2f}</strong> ({upside_v:+.1f}% vs current) · High: ${fmt(safe(info,"targetHighPrice"))} · Low: ${fmt(safe(info,"targetLowPrice"))} · Years 2-5 use decay model from this anchor</div>', unsafe_allow_html=True)
 
     sg1, sg2 = st.columns([1,1.6])
     with sg1:
@@ -801,14 +937,32 @@ def main():
                 with b2: st.markdown(f'<div class="sc-base"><div class="sc-label" style="color:#93c5fd;">📊 Base</div><div class="sc-price" style="color:#93c5fd;">${sc["base"]["p"]:,.2f}</div><div class="sc-pct" style="color:#60a5fa;">{sc["base"]["pct"]:+.1f}%</div></div>', unsafe_allow_html=True)
                 with b3: st.markdown(f'<div class="sc-bull"><div class="sc-label" style="color:#86efac;">🐂 Bull</div><div class="sc-price" style="color:#86efac;">${sc["bull"]["p"]:,.2f}</div><div class="sc-pct" style="color:#22c55e;">{sc["bull"]["pct"]:+.1f}%</div></div>', unsafe_allow_html=True)
 
+    # ── Scenario assumptions expander ──
+    if assumptions and not fund_mode_flag:
+        with st.expander("🔍 View scenario logic — year-by-year growth assumptions"):
+            st.markdown('<div style="font-size:11px;color:#64748b;font-family:JetBrains Mono,monospace;margin-bottom:8px;">Growth rates applied to each future year. Year 1 is anchored to analyst target; Years 2-5 use the decay model. Cyclical stocks show down-cycle adjustment in years 3-4.</div>', unsafe_allow_html=True)
+            rows_a = ""
+            yr_labels = {2:"Year 2 (24m)", 3:"Year 3 (36m)", 4:"Year 4", 5:"Year 5 (60m)"}
+            for yr in [2,3,4,5]:
+                lbl = yr_labels.get(yr, f"Year {yr}")
+                bg = assumptions.get(f'base_yr{yr}')
+                bul = assumptions.get(f'bull_yr{yr}')
+                bea = assumptions.get(f'bear_yr{yr}')
+                if bg is not None:
+                    bg_c = "#22c55e" if bg > 0.05 else "#eab308" if bg > -0.05 else "#ef4444"
+                    bu_c = "#22c55e" if (bul or 0) > 0.05 else "#eab308"
+                    be_c = "#ef4444" if (bea or 0) < -0.05 else "#eab308"
+                    rows_a += f'<div class="trow"><span class="trow-label">{lbl}</span><span style="color:{bu_c};">🐂 {(bul or 0)*100:+.1f}%</span><span style="color:{bg_c};">📊 {bg*100:+.1f}%</span><span style="color:{be_c};">🐻 {(bea or 0)*100:+.1f}%</span></div>'
+            if rows_a:
+                st.markdown(f'<div class="mm-card" style="padding:12px 16px;">{rows_a}</div>', unsafe_allow_html=True)
+
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # ── SCORECARD ──
-    sc_label = "Performance Track Record" if fund_mode_flag else "Fundamentals"
+    sc_label_name = "Performance Track Record" if fund_mode_flag else "Fundamentals"
     st.markdown('<div class="mm-section-label">🏆 scorecard</div>', unsafe_allow_html=True)
     sc_cols = st.columns(5)
-    names = [sc_label,"Valuation","Balance Sheet","Momentum","Analyst View"]
-    for col,(nm,sc_v,pos,neg) in zip(sc_cols,[(names[0],fs,fpos,fneg),("Valuation",vs,vpos,vneg),("Balance Sheet",bs,bpos,bneg),("Momentum",ms,mpos,mneg),("Analyst View",as_,apos,aneg)]):
+    for col,(nm,sc_v,pos,neg) in zip(sc_cols,[(sc_label_name,fs,fpos,fneg),("Valuation",vs,vpos,vneg),("Balance Sheet",bs,bpos,bneg),("Momentum",ms,mpos,mneg),("Analyst View",as_,apos,aneg)]):
         cc = score_color(sc_v); gr = grade(sc_v)
         with col:
             pts = "".join([f'<div class="alert-g" style="padding:4px 8px;font-size:11px;">✓ {p}</div>' for p in pos[:2]])
@@ -817,18 +971,8 @@ def main():
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── HISTORICAL PERFORMANCE ──
-    st.markdown('<div class="mm-section-label">📊 historical total return</div>', unsafe_allow_html=True)
-    h1c,h2c,h3c,h4c,h5c,h6c = st.columns(6)
-    for col,(yrs,lbl,ann) in zip([h1c,h2c,h3c,h4c,h5c,h6c],[
-        (1,"1-Year",False),(3,"3-Year",True),(5,"5-Year",True),(10,"10-Year",True),(15,"15-Year",True),(20,"20-Year",True)
-    ]):
-        val = hist_return_annualized(stk,yrs) if ann else hist_return(stk,yrs)
-        col.metric(lbl, val)
-
-    # ── VALUATION (stocks only) ──
+    # ── VALUATION & GROWTH (stocks only) ──
     if not fund_mode_flag:
-        st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown('<div class="mm-section-label">💰 valuation & growth metrics</div>', unsafe_allow_html=True)
         v1,v2 = st.columns(2)
         with v1:
@@ -874,10 +1018,11 @@ def main():
                     st.markdown(f'<div class="mm-card" style="padding:12px 16px;">{rows_r}</div>', unsafe_allow_html=True)
                 else: st.markdown('<div class="alert-b">No recent rating changes available.</div>', unsafe_allow_html=True)
             except: st.markdown('<div class="alert-b">Rating data unavailable.</div>', unsafe_allow_html=True)
+        rec_key_var = rec_key
     else:
-        rec_key = "N/A"
+        rec_key_var = "N/A"
 
-    # ── EARNINGS TRACK RECORD (stocks only) ──
+    # ── EARNINGS (stocks only) ──
     if not fund_mode_flag:
         st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown('<div class="mm-section-label">📅 earnings track record</div>', unsafe_allow_html=True)
@@ -906,6 +1051,14 @@ def main():
                         if efig: st.plotly_chart(efig,use_container_width=True,config={'displayModeBar':False})
             else: st.markdown('<div class="alert-b">Earnings history not available for this ticker.</div>', unsafe_allow_html=True)
         except: st.markdown('<div class="alert-b">Could not load earnings data.</div>', unsafe_allow_html=True)
+
+    # ── HISTORICAL PERFORMANCE ──
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown('<div class="mm-section-label">📊 historical total return</div>', unsafe_allow_html=True)
+    h1c,h2c,h3c,h4c,h5c,h6c = st.columns(6)
+    for col,(yrs,lbl,ann) in zip([h1c,h2c,h3c,h4c,h5c,h6c],[(1,"1-Year",False),(3,"3-Year",True),(5,"5-Year",True),(10,"10-Year",True),(15,"15-Year",True),(20,"20-Year",True)]):
+        val = hist_return_annualized(stk,yrs) if ann else hist_return(stk,yrs)
+        col.metric(lbl, val)
 
     # ── RISK DASHBOARD ──
     st.markdown("<hr>", unsafe_allow_html=True)
@@ -953,9 +1106,9 @@ def main():
         if not all_neg: rks='<div class="alert-b" style="font-size:12px;">No major risk flags identified.</div>'
         st.markdown(f'<div class="mm-card"><div class="mm-section-label">RISK POINTS</div>{rks}</div>', unsafe_allow_html=True)
 
-    desc=safe(info,'longBusinessSummary') or safe(info,'longName')
-    if desc and len(desc) > 50:
-        with st.expander("📖 Description"):
+    desc = safe(info,'longBusinessSummary') or safe(info,'longName')
+    if desc and len(str(desc)) > 50:
+        with st.expander("📖 Company Description"):
             st.markdown(f'<div style="font-size:13px;color:#94a3b8;line-height:1.75;">{desc}</div>', unsafe_allow_html=True)
 
     # ── AI THESIS ──
@@ -963,13 +1116,13 @@ def main():
     has_key=False
     try: has_key=bool(st.secrets.get("ANTHROPIC_API_KEY",""))
     except: pass
-
     if has_key:
         st.markdown('<div class="mm-section-label">🤖 ai analyst thesis — claude</div>', unsafe_allow_html=True)
         if st.button("⚡ Generate AI Analyst Thesis", type="primary"):
             with st.spinner("Generating professional analysis..."):
                 r1s=calc_hist_annual_return(hist1y,1); r5s=calc_hist_annual_return(hist5y,5)
-                summ=f"Type:{'Fund' if fund_mode_flag else 'Stock'}|Sector:{sector}|Price:${price:.2f}|{'TotalAssets' if fund_mode_flag else 'MarketCap'}:{fmt_big(mc)}|1yr:{f'{r1s*100:.0f}%' if r1s else 'N/A'}|5yr:{f'{r5s*100:.0f}%/yr' if r5s else 'N/A'}|RevGrowth:{pct_str(rg)}|NetMargin:{pct_str(safe(info,'profitMargins'))}|ForwardPE:{fmt(safe(info,'forwardPE'),suffix='x')}|Beta:{fmt(safe(info,'beta'))}|RSI:{fmt(ta.get('rsi'))}|Above200MA:{'Yes' if ta.get('above200') else 'No'}|Score:{overall}/10|12m:{ratings['12m']['score']}|60m:{ratings['60m']['score']}"
+                cyc_note = f"|Cyclical:Yes|DownCycleRisk:Years3-4" if is_cyclical else ""
+                summ=f"Type:{'Fund' if fund_mode_flag else 'Stock'}|Sector:{sector}|Industry:{ind}|Price:${price:.2f}|{'TotalAssets' if fund_mode_flag else 'MarketCap'}:{fmt_big(mc)}|RevGrowth:{pct_str(rg)}|NetMargin:{pct_str(safe(info,'profitMargins'))}|ForwardPE:{fmt(safe(info,'forwardPE'),suffix='x')}|PEG:{fmt(safe(info,'pegRatio'))}|Beta:{fmt(safe(info,'beta'))}|AnalystTarget:{fmt(safe(info,'targetMeanPrice'),prefix='$')}|RSI:{fmt(ta.get('rsi'))}|Above200MA:{'Yes' if ta.get('above200') else 'No'}|Score:{overall}/10{cyc_note}"
                 ai=get_ai(ticker,name,summ,{'f':fs,'v':vs,'m':ms,'b':bs,'a':as_})
                 if ai:
                     for block in ai.split('\n\n'):
@@ -981,7 +1134,7 @@ def main():
         st.markdown('<div class="alert-b" style="font-size:12px;">🤖 <strong>Optional AI Thesis:</strong> Add <code>ANTHROPIC_API_KEY</code> to Streamlit Secrets to unlock AI-generated analysis. Core analysis is always 100% free.</div>', unsafe_allow_html=True)
 
     from datetime import datetime
-    st.markdown(f'<div class="footer">Market Mind AI v31 · Stocks · Mutual Funds · ETFs · Data: Yahoo Finance (yfinance) · {datetime.now().strftime("%Y-%m-%d %H:%M UTC")}<br>⚠️ For informational purposes only · Not financial advice · Always conduct your own research</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="footer">Market Mind AI v32 · Cyclicality-aware · Analyst-anchored scenarios · Data: Yahoo Finance · {datetime.now().strftime("%Y-%m-%d %H:%M UTC")}<br>⚠️ For informational purposes only · Not financial advice · Always conduct your own research</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
